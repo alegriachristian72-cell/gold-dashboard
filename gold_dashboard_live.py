@@ -1,17 +1,45 @@
 import streamlit as st
 import yfinance as yf
-import pandas_ta as ta
 import pandas as pd
-import requests
+import numpy as np
 from bs4 import BeautifulSoup
-import plotly.graph_objects as go
+import requests
 from streamlit_autorefresh import st_autorefresh
 
-# --- Page Config ---
-st.set_page_config(page_title="Gold Dashboard", page_icon="🟡", layout="wide")
+# --- Page setup ---
+st.set_page_config(
+    page_title="Gold (XAU/USD) Dashboard",
+    page_icon="🟡",
+    layout="wide",
+)
 
-# --- Auto refresh settings ---
-REFRESH_MINUTES = 3  # You can change this to 1, 2, 5, etc.
+# --- Custom Dark Theme ---
+st.markdown("""
+    <style>
+        body {
+            background-color: #0E1117;
+            color: #FAFAFA;
+        }
+        .stApp {
+            background-color: #0E1117;
+        }
+        h1, h2, h3, h4, h5 {
+            color: #FFD700 !important;
+        }
+        .css-1v0mbdj, .css-10trblm, .css-1d391kg {
+            color: #FAFAFA !important;
+        }
+        a {
+            color: #FFD700 !important;
+        }
+        hr {
+            border: 1px solid #FFD700;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- Auto Refresh ---
+REFRESH_MINUTES = 3
 st.markdown(f"⏱️ Auto-refreshing every **{REFRESH_MINUTES} minutes**")
 st_autorefresh(interval=REFRESH_MINUTES * 60 * 1000, key="gold_refresh")
 
@@ -19,127 +47,54 @@ st_autorefresh(interval=REFRESH_MINUTES * 60 * 1000, key="gold_refresh")
 st.title("🟡 Gold (XAU/USD) Live Dashboard")
 st.caption("Auto-Updating • Technical Summary • Sentiment • News • Chart")
 
-# --- Fetch Gold Data (Spot + Fallback) ---
-try:
-    gold = yf.Ticker("XAUUSD=X")
+# --- Fetch Gold Data ---
+gold = yf.Ticker("XAUUSD=X")
+data = gold.history(period="1mo", interval="1h")
+
+# Fallback: if empty, use Gold Futures
+if data.empty:
+    gold = yf.Ticker("GC=F")
     data = gold.history(period="1mo", interval="1h")
 
-    # Fallback if empty
-    if data.empty:
-        gold = yf.Ticker("GC=F")  # Gold Futures fallback
-        data = gold.history(period="1mo", interval="1h")
-
-except Exception as e:
-    data = pd.DataFrame()
-
 if data.empty:
-    st.error("Failed to fetch gold data. Try again later.")
+    st.error("Failed to fetch data. Try again later.")
     st.stop()
 
-# --- Calculate Values ---
-price = data["Close"].iloc[-1]
-change = round((data["Close"].iloc[-1] - data["Close"].iloc[-2]) / data["Close"].iloc[-2] * 100, 2)
+# --- Calculate Indicators ---
+data["RSI"] = 100 - (100 / (1 + data["Close"].diff().apply(lambda x: np.nan if x == 0 else x).rolling(14).mean()))
 
-# --- Indicators ---
-rsi = ta.rsi(data["Close"], length=14).iloc[-1]
-macd = ta.macd(data["Close"])
-macd_hist = macd["MACDh_12_26_9"].iloc[-1]
-ema_fast = ta.ema(data["Close"], length=12).iloc[-1]
-ema_slow = ta.ema(data["Close"], length=26).iloc[-1]
-
-# --- Technical Votes ---
-votes = []
-if rsi < 30:
-    votes.append("buy")
-elif rsi > 70:
-    votes.append("sell")
-else:
-    votes.append("neutral")
-
-if macd_hist > 0:
-    votes.append("buy")
-elif macd_hist < 0:
-    votes.append("sell")
-
-if ema_fast > ema_slow:
-    votes.append("buy")
-else:
-    votes.append("sell")
-
-# --- Summary Logic ---
-buy_votes = votes.count("buy")
-sell_votes = votes.count("sell")
-bullish_percent = int((buy_votes / len(votes)) * 100)
-bearish_percent = 100 - bullish_percent
-
-if buy_votes >= 3:
-    summary = "🟢 Strong Buy"
-elif buy_votes == 2:
-    summary = "🟩 Buy"
-elif sell_votes >= 3:
-    summary = "🔴 Strong Sell"
-elif sell_votes == 2:
-    summary = "🟥 Sell"
-else:
-    summary = "⚪ Neutral"
-
-# --- Overview ---
+# --- Display Overview ---
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Price (USD)", f"{price:,.2f}")
-col2.metric("Change (1h)", f"{change} %")
-col3.metric("RSI (14)", f"{rsi:.2f}")
-col4.metric("Summary", summary)
+col1.metric("Price (USD)", f"{data['Close'].iloc[-1]:,.2f}")
+col2.metric("Change (1h)", f"{((data['Close'].iloc[-1] / data['Close'].iloc[-2] - 1) * 100):.2f} %")
+col3.metric("RSI (14)", f"{data['RSI'].iloc[-1]:.2f}")
+col4.metric("Summary", "🟩 Buy" if data['RSI'].iloc[-1] < 30 else "🟥 Sell" if data['RSI'].iloc[-1] > 70 else "🟨 Neutral")
 
-st.divider()
+# --- Sentiment (simple logic) ---
+rsi_val = data['RSI'].iloc[-1]
+sentiment = "🟩 Bullish" if rsi_val < 30 else "🟥 Bearish" if rsi_val > 70 else "🟨 Neutral"
 
-# --- Sentiment Gauge ---
 st.subheader("📊 Market Sentiment")
-fig = go.Figure(go.Indicator(
-    mode="gauge+number+delta",
-    value=bullish_percent,
-    delta={'reference': 50, 'increasing': {'color': "green"}, 'decreasing': {'color': "red"}},
-    title={'text': "Bullish Sentiment (%)"},
-    gauge={
-        'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "darkgray"},
-        'bar': {'color': "gold"},
-        'bgcolor': "white",
-        'steps': [
-            {'range': [0, 20], 'color': '#ff4d4d'},
-            {'range': [20, 40], 'color': '#ff9999'},
-            {'range': [40, 60], 'color': '#f2f2f2'},
-            {'range': [60, 80], 'color': '#a3ffa3'},
-            {'range': [80, 100], 'color': '#33cc33'}
-        ],
-        'threshold': {
-            'line': {'color': "black", 'width': 4},
-            'thickness': 0.75,
-            'value': bullish_percent
-        }
-    }
-))
-fig.update_layout(margin={'t': 50, 'b': 0, 'l': 0, 'r': 0}, height=300, paper_bgcolor="white")
-st.plotly_chart(fig, use_container_width=True)
+st.markdown(f"**Current sentiment:** {sentiment}")
 
-st.divider()
-
-# --- TradingView Chart ---
+# --- TradingView Chart Embed ---
 st.subheader("📈 Live TradingView Chart")
 st.markdown("""
-<iframe src="https://s.tradingview.com/widgetembed/?symbol=OANDA:XAUUSD&interval=60&theme=light&style=1"
-        width="100%" height="500" frameborder="0"></iframe>
+<iframe src="https://s.tradingview.com/widgetembed/?frameElementId=tradingview_gold&symbol=OANDA%3AXAUUSD&interval=60&theme=dark&style=1&locale=en&utm_source=&utm_medium=widget&utm_campaign=chart&utm_term=OANDA%3AXAUUSD"
+width="100%" height="500" frameborder="0" allowtransparency="true" scrolling="no"></iframe>
 """, unsafe_allow_html=True)
 
-st.divider()
-
 # --- News Section ---
-st.subheader("📰 Latest Gold News (via Investing.com RSS)")
-rss_url = "https://www.investing.com/rss/news_301.rss"
+st.subheader("📰 Latest Gold News (via Google Finance)")
+
+rss_url = "https://news.google.com/rss/search?q=gold+OR+XAUUSD+OR+Gold+price&hl=en-US&gl=US&ceid=US:en"
+
 try:
     r = requests.get(rss_url, headers={"User-Agent": "Mozilla/5.0"})
     soup = BeautifulSoup(r.text, "xml")
     items = soup.find_all("item")
 
-    for item in items[:5]:
+    for item in items[:6]:
         title = item.title.text
         link = item.link.text
         pub = item.pubDate.text
@@ -147,5 +102,5 @@ try:
         st.caption(pub)
         st.write("---")
 
-except Exception:
-    st.error("Couldn't fetch news feed. Try again later.")
+except Exception as e:
+    st.error(f"Couldn't fetch news feed. Try again later. ({e})")
