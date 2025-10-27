@@ -7,28 +7,36 @@ from bs4 import BeautifulSoup
 import plotly.graph_objects as go
 from streamlit_autorefresh import st_autorefresh
 
-# --- Config ---
+# --- Page Config ---
 st.set_page_config(page_title="Gold Dashboard", page_icon="🟡", layout="wide")
 
 # --- Auto refresh settings ---
 REFRESH_MINUTES = 3  # You can change this to 1, 2, 5, etc.
 st.markdown(f"⏱️ Auto-refreshing every **{REFRESH_MINUTES} minutes**")
-
-# Auto refresh timer
 st_autorefresh(interval=REFRESH_MINUTES * 60 * 1000, key="gold_refresh")
 
 # --- Header ---
 st.title("🟡 Gold (XAU/USD) Live Dashboard")
 st.caption("Auto-Updating • Technical Summary • Sentiment • News • Chart")
 
-# --- Fetch Gold Data ---
-gold = yf.Ticker("XAUUSD=X")
-data = gold.history(period="1mo", interval="1h")
+# --- Fetch Gold Data (Spot + Fallback) ---
+try:
+    gold = yf.Ticker("XAUUSD=X")
+    data = gold.history(period="1mo", interval="1h")
+
+    # Fallback if empty
+    if data.empty:
+        gold = yf.Ticker("GC=F")  # Gold Futures fallback
+        data = gold.history(period="1mo", interval="1h")
+
+except Exception as e:
+    data = pd.DataFrame()
 
 if data.empty:
-    st.error("Failed to fetch data. Try again later.")
+    st.error("Failed to fetch gold data. Try again later.")
     st.stop()
 
+# --- Calculate Values ---
 price = data["Close"].iloc[-1]
 change = round((data["Close"].iloc[-1] - data["Close"].iloc[-2]) / data["Close"].iloc[-2] * 100, 2)
 
@@ -41,15 +49,22 @@ ema_slow = ta.ema(data["Close"], length=26).iloc[-1]
 
 # --- Technical Votes ---
 votes = []
-if rsi < 30: votes.append("buy")
-elif rsi > 70: votes.append("sell")
-else: votes.append("neutral")
+if rsi < 30:
+    votes.append("buy")
+elif rsi > 70:
+    votes.append("sell")
+else:
+    votes.append("neutral")
 
-if macd_hist > 0: votes.append("buy")
-elif macd_hist < 0: votes.append("sell")
+if macd_hist > 0:
+    votes.append("buy")
+elif macd_hist < 0:
+    votes.append("sell")
 
-if ema_fast > ema_slow: votes.append("buy")
-else: votes.append("sell")
+if ema_fast > ema_slow:
+    votes.append("buy")
+else:
+    votes.append("sell")
 
 # --- Summary Logic ---
 buy_votes = votes.count("buy")
@@ -116,7 +131,7 @@ st.markdown("""
 
 st.divider()
 
-# --- News Section (RSS Feed) ---
+# --- News Section ---
 st.subheader("📰 Latest Gold News (via Investing.com RSS)")
 rss_url = "https://www.investing.com/rss/news_301.rss"
 try:
@@ -132,5 +147,5 @@ try:
         st.caption(pub)
         st.write("---")
 
-except Exception as e:
+except Exception:
     st.error("Couldn't fetch news feed. Try again later.")
