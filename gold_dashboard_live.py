@@ -5,22 +5,16 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 import plotly.graph_objects as go
-import time
+from streamlit_autorefresh import st_autorefresh
 
 # --- Config ---
 st.set_page_config(page_title="Gold Dashboard", page_icon="🟡", layout="wide")
 
 # --- Auto refresh settings ---
-REFRESH_MINUTES = 3   # ← you can change this to 1, 2, 5, etc.
-st_autorefresh = st.empty()
-st_autorefresh.markdown(f"⏱️ Auto-refreshing every **{REFRESH_MINUTES} minutes**")
+REFRESH_MINUTES = 3  # You can change this to 1, 2, 5, etc.
+st.markdown(f"⏱️ Auto-refreshing every **{REFRESH_MINUTES} minutes**")
 
-# --- Trigger auto refresh ---
-st_autorefresh = st.experimental_rerun  # safety alias
-st_autorefresh_placeholder = st.empty()
-
-# Schedule refresh using streamlit_autorefresh
-from streamlit_autorefresh import st_autorefresh
+# Auto refresh timer
 st_autorefresh(interval=REFRESH_MINUTES * 60 * 1000, key="gold_refresh")
 
 # --- Header ---
